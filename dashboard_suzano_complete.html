@@ -1,0 +1,282 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Suzano - SharePoint + Creare API</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #333; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { background: rgba(255,255,255,0.95); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); text-align: center; }
+        .header h1 { color: #2c3e50; font-size: 2.2em; margin-bottom: 10px; font-weight: 700; }
+        .header .subtitle { color: #7f8c8d; font-size: 1.1em; margin-bottom: 15px; }
+        .status { display: inline-block; background: #27ae60; color: white; padding: 8px 16px; border-radius: 20px; font-size: 0.9em; font-weight: 600; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 25px; margin-bottom: 40px; }
+        .metric-card { background: white; border-radius: 18px; padding: 35px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); transition: transform 0.3s ease; }
+        .metric-card:hover { transform: translateY(-8px); }
+        .metric-title { font-size: 0.95em; color: #7f8c8d; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 15px; }
+        .metric-value { font-size: 3.8em; font-weight: 800; color: #2c3e50; margin-bottom: 15px; line-height: 1; }
+        .metric-change { font-size: 0.9em; font-weight: 600; padding: 6px 12px; border-radius: 25px; display: inline-block; }
+        .metric-change.positive { background: rgba(46, 204, 113, 0.15); color: #27ae60; }
+        .metric-change.improvement { background: rgba(52, 152, 219, 0.15); color: #3498db; }
+        .metric-change.neutral { background: rgba(149, 165, 166, 0.15); color: #95a5a6; }
+        .validation-section { background: white; border-radius: 18px; padding: 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); margin-bottom: 30px; }
+        .validation-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+        .validation-title { font-size: 1.5em; color: #2c3e50; font-weight: 700; }
+        .btn { background: #3498db; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; margin-left: 10px; }
+        .btn:hover { background: #2980b9; transform: translateY(-2px); }
+        .btn.success { background: #27ae60; }
+        .btn.warning { background: #f39c12; }
+        .btn:disabled { background: #95a5a6; cursor: not-allowed; transform: none; }
+        .validation-status { background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #3498db; }
+        .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-radius: 50%; border-top-color: #3498db; animation: spin 1s ease-in-out infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .progress-bar { width: 100%; height: 8px; background: #ecf0f1; border-radius: 4px; overflow: hidden; margin: 10px 0; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #3498db, #27ae60); transition: width 0.3s ease; }
+        .comparison-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
+        .comparison-card { padding: 20px; border-radius: 10px; text-align: center; }
+        .comparison-card.sharepoint { background: linear-gradient(135deg, #e3f2fd, #bbdefb); color: #1976d2; }
+        .comparison-card.creare { background: linear-gradient(135deg, #f3e5f5, #e1bee7); color: #7b1fa2; }
+        .comparison-value { font-size: 2.2em; font-weight: 800; margin-bottom: 5px; }
+        .comparison-label { font-size: 0.9em; font-weight: 600; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏢 Dashboard Suzano</h1>
+            <p class="subtitle">Visão geral dos principais indicadores operacionais e métricas de performance do sistema de alertas.</p>
+            <div class="status" id="system-status"><span class="loading"></span> Carregando sistema...</div>
+        </div>
+
+        <!-- Métricas Principais (EXATAS do dashboard-final-completo.html) -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-title">Total de Desvios</div>
+                <div class="metric-value" id="total-desvios"><span class="loading"></span></div>
+                <div class="metric-change positive">+12% vs mês anterior</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Alertas Ativos</div>
+                <div class="metric-value" id="alertas-ativos"><span class="loading"></span></div>
+                <div class="metric-change positive">+8% vs semana anterior</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Tempo Médio de Resolução</div>
+                <div class="metric-value" id="tempo-resolucao"><span class="loading"></span></div>
+                <div class="metric-change improvement">-15% melhoria</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Eficiência Operacional</div>
+                <div class="metric-value" id="eficiencia-operacional"><span class="loading"></span></div>
+                <div class="metric-change positive">+5% vs meta</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Veículos Monitorados</div>
+                <div class="metric-value" id="veiculos-monitorados"><span class="loading"></span></div>
+                <div class="metric-change neutral">veículos</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Pontos de Interesse</div>
+                <div class="metric-value" id="pontos-interesse"><span class="loading"></span></div>
+                <div class="metric-change neutral">pontos</div>
+            </div>
+        </div>
+
+        <!-- Validação Completa SharePoint vs Creare (2 meses) -->
+        <div class="validation-section">
+            <div class="validation-header">
+                <h2 class="validation-title">🔍 Validação Completa: SharePoint vs API Creare (2 meses)</h2>
+                <div>
+                    <button class="btn" onclick="runCompleteValidation()" id="validation-btn">🚀 Iniciar Validação Completa</button>
+                    <button class="btn success" onclick="showValidationReport()" id="report-btn" disabled>📊 Ver Relatório</button>
+                </div>
+            </div>
+            
+            <div class="validation-status">
+                <p><strong>Status:</strong> <span id="validation-status-text">Pronto para execução</span></p>
+                <p><strong>Processo:</strong> Coleta otimizada de 2 meses da API Creare + Comparação com SharePoint</p>
+                <p><strong>Tempo estimado:</strong> <span id="estimated-time">15-30 minutos</span></p>
+                <div id="progress-container" style="display: none;">
+                    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+                    <p id="progress-text">Iniciando...</p>
+                </div>
+            </div>
+            
+            <div id="validation-results" style="display: none;">
+                <h3>📊 Resultado da Validação Completa</h3>
+                <div class="comparison-grid">
+                    <div class="comparison-card sharepoint">
+                        <div class="comparison-value" id="sp-total">-</div>
+                        <div class="comparison-label">Registros SharePoint</div>
+                        <small>Fonte Principal</small>
+                    </div>
+                    <div class="comparison-card creare">
+                        <div class="comparison-value" id="creare-total">-</div>
+                        <div class="comparison-label">Eventos Creare (2 meses)</div>
+                        <small>Validação Completa</small>
+                    </div>
+                </div>
+                <div id="validation-analysis"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = 'http://localhost:8000';
+        let validationInterval = null;
+
+        async function loadDashboardData() {
+            try {
+                document.getElementById('system-status').innerHTML = '<span class="loading"></span> Carregando métricas...';
+                
+                const response = await fetch(`${API}/api/metrics`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Valores EXATOS do dashboard original
+                    document.getElementById('total-desvios').textContent = data.metrics.total_desvios.toLocaleString();
+                    document.getElementById('alertas-ativos').textContent = data.metrics.alertas_ativos.toLocaleString();
+                    document.getElementById('tempo-resolucao').textContent = data.metrics.tempo_medio_resolucao;
+                    document.getElementById('eficiencia-operacional').textContent = data.metrics.eficiencia_operacional;
+                    document.getElementById('veiculos-monitorados').textContent = data.metrics.veiculos_monitorados.toLocaleString();
+                    document.getElementById('pontos-interesse').textContent = data.metrics.pontos_interesse;
+                    
+                    document.getElementById('system-status').innerHTML = '✅ Sistema Online - SharePoint + Creare Ready';
+                    document.getElementById('system-status').style.background = '#27ae60';
+                }
+            } catch (error) {
+                document.getElementById('system-status').innerHTML = '❌ Erro de Conexão';
+                document.getElementById('system-status').style.background = '#e74c3c';
+            }
+        }
+
+        async function runCompleteValidation() {
+            const btn = document.getElementById('validation-btn');
+            const statusText = document.getElementById('validation-status-text');
+            const progressContainer = document.getElementById('progress-container');
+            const progressFill = document.getElementById('progress-fill');
+            const progressText = document.getElementById('progress-text');
+            
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Executando...';
+            statusText.textContent = 'Iniciando validação completa...';
+            progressContainer.style.display = 'block';
+            
+            try {
+                // Iniciar validação
+                const response = await fetch(`${API}/api/validation/run-complete`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    statusText.textContent = 'Validação iniciada - Coletando dados da API Creare...';
+                    progressText.textContent = 'Coletando eventos dos últimos 2 meses...';
+                    
+                    // Monitorar progresso
+                    let progress = 0;
+                    validationInterval = setInterval(async () => {
+                        try {
+                            const statusResponse = await fetch(`${API}/api/validation/status`);
+                            const statusData = await statusResponse.json();
+                            
+                            if (statusData.is_running) {
+                                progress = Math.min(progress + 5, 90);
+                                progressFill.style.width = progress + '%';
+                                progressText.textContent = `Coletando dados Creare... ${progress}%`;
+                            } else {
+                                // Validação concluída
+                                clearInterval(validationInterval);
+                                progressFill.style.width = '100%';
+                                progressText.textContent = 'Validação concluída!';
+                                statusText.textContent = '✅ Validação completa finalizada';
+                                
+                                document.getElementById('report-btn').disabled = false;
+                                document.getElementById('validation-results').style.display = 'block';
+                                
+                                // Carregar resultados
+                                await loadValidationResults();
+                            }
+                        } catch (e) {
+                            console.error('Erro no monitoramento:', e);
+                        }
+                    }, 3000);
+                    
+                } else {
+                    statusText.textContent = `Erro: ${result.message}`;
+                }
+            } catch (error) {
+                statusText.textContent = `Erro de conexão: ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🚀 Iniciar Validação Completa';
+            }
+        }
+
+        async function loadValidationResults() {
+            try {
+                const response = await fetch(`${API}/api/validation/report`);
+                const data = await response.json();
+                
+                if (data.available) {
+                    const summary = data.summary;
+                    document.getElementById('sp-total').textContent = summary.sharepoint_total.toLocaleString();
+                    document.getElementById('creare-total').textContent = summary.creare_total.toLocaleString();
+                    
+                    const analysisDiv = document.getElementById('validation-analysis');
+                    const ratio = (summary.comparison_ratio * 100).toFixed(4);
+                    
+                    analysisDiv.innerHTML = `
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-top: 20px;">
+                            <h4>📈 Análise Comparativa</h4>
+                            <p><strong>Proporção:</strong> ${ratio}% (Creare vs SharePoint)</p>
+                            <p><strong>Status:</strong> <span style="color: #27ae60; font-weight: 600;">${summary.validation_status}</span></p>
+                            <p><strong>Observação:</strong> Dados Creare representam 2 meses recentes vs histórico completo SharePoint</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Erro ao carregar resultados:', error);
+            }
+        }
+
+        async function showValidationReport() {
+            try {
+                const response = await fetch(`${API}/api/validation/report`);
+                const data = await response.json();
+                
+                if (data.available) {
+                    const reportWindow = window.open('', '_blank', 'width=1000,height=800,scrollbars=yes');
+                    reportWindow.document.write(`
+                        <html>
+                            <head>
+                                <title>Relatório Completo - SharePoint vs Creare (2 meses)</title>
+                                <style>body{font-family:Arial;padding:20px;line-height:1.6;}h1,h2{color:#2c3e50;}pre{background:#f8f9fa;padding:15px;border-radius:5px;font-size:12px;overflow:auto;}.summary{background:#e3f2fd;padding:15px;border-radius:5px;margin:15px 0;}</style>
+                            </head>
+                            <body>
+                                <h1>📊 Relatório Completo - Validação Suzano</h1>
+                                <div class="summary">
+                                    <h3>Resumo Executivo</h3>
+                                    <p><strong>SharePoint:</strong> ${data.summary.sharepoint_total.toLocaleString()} registros (histórico completo)</p>
+                                    <p><strong>API Creare:</strong> ${data.summary.creare_total.toLocaleString()} eventos (2 meses)</p>
+                                    <p><strong>Proporção:</strong> ${(data.summary.comparison_ratio * 100).toFixed(4)}%</p>
+                                    <p><strong>Status:</strong> ${data.summary.validation_status}</p>
+                                </div>
+                                <h3>Relatório Técnico Detalhado</h3>
+                                <pre>${JSON.stringify(data.report, null, 2)}</pre>
+                            </body>
+                        </html>
+                    `);
+                }
+            } catch (error) {
+                alert('Erro: ' + error.message);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDashboardData();
+            setInterval(loadDashboardData, 600000); // 10 minutos
+        });
+    </script>
+</body>
+</html>

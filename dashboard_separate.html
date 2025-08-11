@@ -1,0 +1,236 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Suzano - Coleta Separada</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { background: rgba(255,255,255,0.95); border-radius: 15px; padding: 30px; margin-bottom: 30px; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+        .header h1 { color: #2c3e50; font-size: 2.5em; margin-bottom: 10px; }
+        .collection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px; }
+        .collection-card { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+        .card-title { font-size: 1.5em; color: #2c3e50; margin-bottom: 20px; text-align: center; }
+        .btn { width: 100%; padding: 15px; border: none; border-radius: 8px; font-size: 1.1em; font-weight: 600; cursor: pointer; transition: all 0.3s ease; margin: 10px 0; }
+        .btn:hover:not(:disabled) { transform: translateY(-2px); }
+        .btn-sharepoint { background: linear-gradient(135deg, #1976d2, #1565c0); color: white; }
+        .btn-creare { background: linear-gradient(135deg, #7b1fa2, #6a1b9a); color: white; }
+        .btn-compare { background: linear-gradient(135deg, #f57c00, #ef6c00); color: white; }
+        .btn:disabled { background: #95a5a6; cursor: not-allowed; transform: none; }
+        .progress-container { margin: 15px 0; }
+        .progress-bar { width: 100%; height: 10px; background: #ecf0f1; border-radius: 5px; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: 5px; transition: width 0.3s ease; }
+        .progress-fill.sharepoint { background: linear-gradient(90deg, #1976d2, #42a5f5); }
+        .progress-fill.creare { background: linear-gradient(90deg, #7b1fa2, #ba68c8); }
+        .progress-text { text-align: center; margin-top: 8px; font-size: 0.9em; color: #666; }
+        .status { padding: 10px; border-radius: 8px; margin: 10px 0; text-align: center; font-weight: 600; }
+        .status.ready { background: #e8f5e8; color: #2e7d32; }
+        .status.running { background: #fff3e0; color: #f57c00; }
+        .status.completed { background: #e3f2fd; color: #1976d2; }
+        .comparison-section { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+        .results { background: #f8f9fa; padding: 20px; border-radius: 10px; margin-top: 20px; white-space: pre-wrap; font-family: monospace; }
+        @media (max-width: 768px) { .collection-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏢 Dashboard Suzano</h1>
+            <p>Coleta Separada: SharePoint + API Creare com Progresso Individual</p>
+        </div>
+
+        <div class="collection-grid">
+            <!-- SharePoint -->
+            <div class="collection-card">
+                <h2 class="card-title">📊 Dados SharePoint</h2>
+                <div class="status ready" id="sp-status">Pronto para coleta</div>
+                <button class="btn btn-sharepoint" onclick="collectSharePoint()" id="sp-btn">
+                    📥 Coletar SharePoint
+                </button>
+                <div class="progress-container" id="sp-progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill sharepoint" id="sp-progress-fill"></div>
+                    </div>
+                    <div class="progress-text" id="sp-progress-text">Preparando...</div>
+                </div>
+            </div>
+
+            <!-- Creare API -->
+            <div class="collection-card">
+                <h2 class="card-title">🚀 API Creare</h2>
+                <div class="status ready" id="creare-status">Pronto para coleta (2 meses)</div>
+                <button class="btn btn-creare" onclick="collectCreare()" id="creare-btn">
+                    📡 Coletar Creare API
+                </button>
+                <div class="progress-container" id="creare-progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill creare" id="creare-progress-fill"></div>
+                    </div>
+                    <div class="progress-text" id="creare-progress-text">Preparando...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Comparação -->
+        <div class="comparison-section">
+            <h2 class="card-title">🔍 Comparação de Dados</h2>
+            <button class="btn btn-compare" onclick="compareData()" id="compare-btn" disabled>
+                ⚖️ Executar Comparação
+            </button>
+            <div class="results" id="results" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API = 'http://localhost:8000';
+        let spInterval = null;
+        let creareInterval = null;
+
+        async function collectSharePoint() {
+            const btn = document.getElementById('sp-btn');
+            const progressContainer = document.getElementById('sp-progress-container');
+            const progressFill = document.getElementById('sp-progress-fill');
+            const progressText = document.getElementById('sp-progress-text');
+            const status = document.getElementById('sp-status');
+            
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Coletando...';
+            progressContainer.style.display = 'block';
+            status.className = 'status running';
+            status.textContent = 'Coletando dados SharePoint...';
+            
+            try {
+                const response = await fetch(`${API}/api/collect-sharepoint`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    spInterval = setInterval(async () => {
+                        try {
+                            const progressResponse = await fetch(`${API}/api/sharepoint-progress`);
+                            const progressData = await progressResponse.json();
+                            
+                            progressFill.style.width = progressData.progress + '%';
+                            progressText.textContent = `Progresso: ${progressData.progress}%`;
+                            
+                            if (!progressData.running) {
+                                clearInterval(spInterval);
+                                
+                                const dataResponse = await fetch(`${API}/api/sharepoint-data`);
+                                const dataResult = await dataResponse.json();
+                                
+                                if (dataResult.success) {
+                                    status.className = 'status completed';
+                                    status.textContent = `✅ ${dataResult.summary.total_records.toLocaleString()} registros coletados`;
+                                    checkComparison();
+                                }
+                                
+                                progressContainer.style.display = 'none';
+                            }
+                        } catch (e) {
+                            console.error('Erro:', e);
+                        }
+                    }, 1000);
+                }
+            } catch (error) {
+                status.className = 'status ready';
+                status.textContent = `❌ Erro: ${error.message}`;
+                progressContainer.style.display = 'none';
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '📥 Coletar SharePoint';
+            }
+        }
+
+        async function collectCreare() {
+            const btn = document.getElementById('creare-btn');
+            const progressContainer = document.getElementById('creare-progress-container');
+            const progressFill = document.getElementById('creare-progress-fill');
+            const progressText = document.getElementById('creare-progress-text');
+            const status = document.getElementById('creare-status');
+            
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Coletando...';
+            progressContainer.style.display = 'block';
+            status.className = 'status running';
+            status.textContent = 'Coletando dados Creare API...';
+            
+            try {
+                const response = await fetch(`${API}/api/collect-creare`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    creareInterval = setInterval(async () => {
+                        try {
+                            const progressResponse = await fetch(`${API}/api/creare-progress`);
+                            const progressData = await progressResponse.json();
+                            
+                            progressFill.style.width = progressData.progress + '%';
+                            progressText.textContent = `Progresso: ${progressData.progress}%`;
+                            
+                            if (!progressData.running) {
+                                clearInterval(creareInterval);
+                                
+                                const dataResponse = await fetch(`${API}/api/creare-data`);
+                                const dataResult = await dataResponse.json();
+                                
+                                if (dataResult.success) {
+                                    status.className = 'status completed';
+                                    status.textContent = `✅ ${dataResult.summary.total_events.toLocaleString()} eventos coletados`;
+                                    checkComparison();
+                                }
+                                
+                                progressContainer.style.display = 'none';
+                            }
+                        } catch (e) {
+                            console.error('Erro:', e);
+                        }
+                    }, 2000);
+                }
+            } catch (error) {
+                status.className = 'status ready';
+                status.textContent = `❌ Erro: ${error.message}`;
+                progressContainer.style.display = 'none';
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '📡 Coletar Creare API';
+            }
+        }
+
+        async function compareData() {
+            const btn = document.getElementById('compare-btn');
+            const results = document.getElementById('results');
+            
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Comparando...';
+            
+            try {
+                const response = await fetch(`${API}/api/compare-data`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    results.style.display = 'block';
+                    results.textContent = JSON.stringify(result.comparison, null, 2);
+                }
+            } catch (error) {
+                alert(`Erro na comparação: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '⚖️ Executar Comparação';
+            }
+        }
+
+        function checkComparison() {
+            fetch(`${API}/api/system-status`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.sharepoint.data_available && data.creare.data_available) {
+                        document.getElementById('compare-btn').disabled = false;
+                    }
+                })
+                .catch(console.error);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,393 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Suzano - Dados Unificados</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #333; padding: 20px; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        .header { background: rgba(255,255,255,0.95); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); text-align: center; }
+        .header h1 { color: #2c3e50; font-size: 2.5em; margin-bottom: 10px; font-weight: 700; }
+        .header .subtitle { color: #7f8c8d; font-size: 1.2em; margin-bottom: 15px; }
+        .status { display: inline-block; background: #27ae60; color: white; padding: 10px 20px; border-radius: 25px; font-size: 1em; font-weight: 600; }
+        .status.updating { background: #f39c12; }
+        .status.error { background: #e74c3c; }
+        
+        /* Controles */
+        .controls { background: white; border-radius: 15px; padding: 20px; margin-bottom: 30px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); text-align: center; }
+        .btn { background: #3498db; color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 1.1em; font-weight: 600; cursor: pointer; transition: all 0.3s ease; margin: 0 10px; }
+        .btn:hover { background: #2980b9; transform: translateY(-2px); }
+        .btn.success { background: #27ae60; }
+        .btn.warning { background: #f39c12; }
+        .btn:disabled { background: #95a5a6; cursor: not-allowed; transform: none; }
+        
+        /* Métricas */
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 25px; margin-bottom: 40px; }
+        .metric-card { background: white; border-radius: 18px; padding: 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); transition: transform 0.3s ease; text-align: center; }
+        .metric-card:hover { transform: translateY(-5px); }
+        .metric-title { font-size: 1em; color: #7f8c8d; font-weight: 600; text-transform: uppercase; margin-bottom: 15px; }
+        .metric-value { font-size: 3em; font-weight: 800; color: #2c3e50; margin-bottom: 10px; }
+        .metric-source { font-size: 0.85em; color: #95a5a6; }
+        
+        /* Dados */
+        .data-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 40px; }
+        .data-section { background: white; border-radius: 18px; padding: 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
+        .data-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .data-title { font-size: 1.5em; color: #2c3e50; font-weight: 700; }
+        .data-badge { padding: 5px 12px; border-radius: 15px; font-size: 0.85em; font-weight: 600; }
+        .badge-sharepoint { background: #e3f2fd; color: #1976d2; }
+        .badge-creare { background: #f3e5f5; color: #7b1fa2; }
+        
+        .data-table { width: 100%; border-collapse: collapse; }
+        .data-table th, .data-table td { padding: 12px; text-align: left; border-bottom: 1px solid #ecf0f1; }
+        .data-table th { background: #f8f9fa; font-weight: 600; }
+        .data-table tr:hover { background: #f8f9fa; }
+        
+        /* Progress */
+        .progress-container { margin: 20px 0; }
+        .progress-bar { width: 100%; height: 10px; background: #ecf0f1; border-radius: 5px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #3498db, #27ae60); transition: width 0.3s ease; }
+        .progress-text { text-align: center; margin-top: 10px; font-weight: 600; }
+        
+        .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-radius: 50%; border-top-color: #3498db; animation: spin 1s ease-in-out infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        @media (max-width: 768px) {
+            .data-sections { grid-template-columns: 1fr; }
+            .metrics-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🏢 Dashboard Suzano - Dados Unificados</h1>
+            <p class="subtitle">SharePoint (todas as listas) + API Creare (2 meses) em tempo real</p>
+            <div class="status" id="system-status">
+                <span class="loading"></span> Carregando sistema...
+            </div>
+        </div>
+
+        <!-- Controles -->
+        <div class="controls">
+            <button class="btn success" onclick="updateAllData()" id="update-btn">
+                🔄 Atualizar Dados (SharePoint + Creare)
+            </button>
+            <button class="btn" onclick="viewSharePointData()" id="sp-btn">
+                📊 Ver Dados SharePoint
+            </button>
+            <button class="btn" onclick="viewCreareData()" id="creare-btn">
+                🚀 Ver Dados Creare API
+            </button>
+            
+            <div id="update-progress" class="progress-container" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-text" id="progress-text">Preparando...</div>
+            </div>
+        </div>
+
+        <!-- Métricas Principais -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-title">Total de Desvios</div>
+                <div class="metric-value" id="total-desvios"><span class="loading"></span></div>
+                <div class="metric-source">Calculado automaticamente</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Alertas Ativos</div>
+                <div class="metric-value" id="alertas-ativos"><span class="loading"></span></div>
+                <div class="metric-source">Em tempo real</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Registros SharePoint</div>
+                <div class="metric-value" id="sharepoint-records"><span class="loading"></span></div>
+                <div class="metric-source">Todas as 3 listas</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Eventos Creare</div>
+                <div class="metric-value" id="creare-events"><span class="loading"></span></div>
+                <div class="metric-source">Últimos 2 meses</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Veículos Monitorados</div>
+                <div class="metric-value" id="veiculos-monitorados"><span class="loading"></span></div>
+                <div class="metric-source">API Creare</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Eficiência Operacional</div>
+                <div class="metric-value" id="eficiencia-operacional"><span class="loading"></span></div>
+                <div class="metric-source">Dados unificados</div>
+            </div>
+        </div>
+
+        <!-- Dados por Fonte -->
+        <div class="data-sections">
+            <!-- SharePoint -->
+            <div class="data-section">
+                <div class="data-header">
+                    <h2 class="data-title">📊 Dados SharePoint</h2>
+                    <span class="data-badge badge-sharepoint" id="sp-status">Carregando...</span>
+                </div>
+                <div id="sharepoint-summary" style="margin-bottom: 20px;"></div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Título</th>
+                            <th>Lista</th>
+                            <th>Criado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sharepoint-table">
+                        <tr>
+                            <td colspan="4" style="text-align: center; padding: 20px;">
+                                <span class="loading"></span> Carregando dados SharePoint...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Creare API -->
+            <div class="data-section">
+                <div class="data-header">
+                    <h2 class="data-title">🚀 Dados Creare API</h2>
+                    <span class="data-badge badge-creare" id="creare-status">Carregando...</span>
+                </div>
+                <div id="creare-summary" style="margin-bottom: 20px;"></div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Evento</th>
+                            <th>Veículo</th>
+                            <th>Data/Hora</th>
+                            <th>Tipo</th>
+                        </tr>
+                    </thead>
+                    <tbody id="creare-table">
+                        <tr>
+                            <td colspan="4" style="text-align: center; padding: 20px;">
+                                <span class="loading"></span> Carregando eventos Creare...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Info Sistema -->
+        <div class="data-section">
+            <h3>ℹ️ Informações do Sistema</h3>
+            <div id="system-info" style="margin-top: 15px;">
+                <p><strong>Status:</strong> <span id="detailed-status">Inicializando...</span></p>
+                <p><strong>Última Atualização:</strong> <span id="last-update">--</span></p>
+                <p><strong>Fontes de Dados:</strong> SharePoint (3 listas) + API Creare (2 meses)</p>
+                <p><strong>Modo:</strong> Atualização incremental automática</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = 'http://localhost:8000';
+        let updateInterval = null;
+
+        // Carregar dados iniciais
+        async function loadInitialData() {
+            try {
+                document.getElementById('system-status').innerHTML = '<span class="loading"></span> Carregando dados unificados...';
+                
+                // Métricas do dashboard
+                const metricsResponse = await fetch(`${API}/api/dashboard-metrics`);
+                const metricsData = await metricsResponse.json();
+                
+                if (metricsData.success) {
+                    const metrics = metricsData.metrics;
+                    
+                    document.getElementById('total-desvios').textContent = metrics.total_desvios.toLocaleString();
+                    document.getElementById('alertas-ativos').textContent = metrics.alertas_ativos.toLocaleString();
+                    document.getElementById('veiculos-monitorados').textContent = metrics.veiculos_monitorados.toLocaleString();
+                    document.getElementById('eficiencia-operacional').textContent = metrics.eficiencia_operacional;
+                    
+                    // Dados das fontes
+                    const spData = metricsData.data_sources.sharepoint;
+                    const creareData = metricsData.data_sources.creare;
+                    
+                    document.getElementById('sharepoint-records').textContent = spData.total_records.toLocaleString();
+                    document.getElementById('creare-events').textContent = creareData.total_events.toLocaleString();
+                    
+                    document.getElementById('system-status').innerHTML = '✅ Sistema Online - Dados Unificados';
+                    document.getElementById('system-status').className = 'status';
+                    
+                    if (metricsData.last_update) {
+                        document.getElementById('last-update').textContent = new Date(metricsData.last_update.last_update).toLocaleString('pt-BR');
+                    }
+                } else {
+                    document.getElementById('system-status').innerHTML = '⚠️ Sem Dados - Execute Atualização';
+                    document.getElementById('system-status').className = 'status error';
+                }
+                
+                // Carregar dados das tabelas
+                loadSharePointData();
+                loadCreareData();
+                
+            } catch (error) {
+                console.error('Erro ao carregar dados:', error);
+                document.getElementById('system-status').innerHTML = '❌ Erro de Conexão';
+                document.getElementById('system-status').className = 'status error';
+            }
+        }
+
+        // Carregar dados SharePoint
+        async function loadSharePointData() {
+            try {
+                const response = await fetch(`${API}/api/sharepoint-data?limit=20`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Status
+                    document.getElementById('sp-status').textContent = `${data.summary.total_records.toLocaleString()} registros`;
+                    
+                    // Resumo
+                    const summary = document.getElementById('sharepoint-summary');
+                    summary.innerHTML = `
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; font-size: 0.9em;">
+                            ${Object.entries(data.summary.lists_breakdown).map(([list, count]) => 
+                                `<div><strong>${list}:</strong> ${count.toLocaleString()}</div>`
+                            ).join('')}
+                        </div>
+                    `;
+                    
+                    // Tabela
+                    const tbody = document.getElementById('sharepoint-table');
+                    tbody.innerHTML = data.events.map(event => `
+                        <tr>
+                            <td>${event.id}</td>
+                            <td>${event.title}</td>
+                            <td><span class="data-badge badge-sharepoint">${event.source}</span></td>
+                            <td>${new Date(event.created).toLocaleDateString('pt-BR')}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Erro SharePoint:', error);
+            }
+        }
+
+        // Carregar dados Creare
+        async function loadCreareData() {
+            try {
+                const response = await fetch(`${API}/api/creare-data?limit=20`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Status
+                    document.getElementById('creare-status').textContent = `${data.summary.total_events.toLocaleString()} eventos`;
+                    
+                    // Resumo
+                    const summary = document.getElementById('creare-summary');
+                    const analysis = data.analysis;
+                    summary.innerHTML = `
+                        <div style="font-size: 0.9em;">
+                            <div><strong>Período:</strong> ${data.summary.period}</div>
+                            <div><strong>Veículos únicos:</strong> ${analysis.unique_vehicles}</div>
+                            <div><strong>Eventos/dia:</strong> ${analysis.events_per_day_avg.toFixed(1)}</div>
+                        </div>
+                    `;
+                    
+                    // Tabela
+                    const tbody = document.getElementById('creare-table');
+                    tbody.innerHTML = data.events.map(event => `
+                        <tr>
+                            <td>${event.title}</td>
+                            <td>${event.vehicle || 'N/A'}</td>
+                            <td>${new Date(event.created).toLocaleString('pt-BR')}</td>
+                            <td><span class="data-badge badge-creare">${event.type}</span></td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Erro Creare:', error);
+            }
+        }
+
+        // Atualizar todos os dados
+        async function updateAllData() {
+            const btn = document.getElementById('update-btn');
+            const progressContainer = document.getElementById('update-progress');
+            const progressFill = document.getElementById('progress-fill');
+            const progressText = document.getElementById('progress-text');
+            
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Atualizando...';
+            progressContainer.style.display = 'block';
+            progressFill.style.width = '0%';
+            
+            try {
+                // Iniciar atualização
+                const response = await fetch(`${API}/api/update-data`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    progressText.textContent = 'Coletando dados SharePoint + Creare API...';
+                    
+                    // Monitorar progresso
+                    updateInterval = setInterval(async () => {
+                        try {
+                            const statusResponse = await fetch(`${API}/api/update-status`);
+                            const statusData = await statusResponse.json();
+                            
+                            if (statusData.is_updating) {
+                                progressFill.style.width = statusData.progress + '%';
+                                progressText.textContent = `Progresso: ${statusData.progress}%`;
+                            } else {
+                                // Atualização concluída
+                                clearInterval(updateInterval);
+                                progressFill.style.width = '100%';
+                                progressText.textContent = 'Atualização concluída!';
+                                
+                                // Recarregar dados
+                                setTimeout(() => {
+                                    loadInitialData();
+                                    progressContainer.style.display = 'none';
+                                }, 2000);
+                            }
+                        } catch (e) {
+                            console.error('Erro no monitoramento:', e);
+                        }
+                    }, 3000);
+                    
+                } else {
+                    progressText.textContent = `Erro: ${result.message}`;
+                }
+            } catch (error) {
+                progressText.textContent = `Erro: ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🔄 Atualizar Dados (SharePoint + Creare)';
+            }
+        }
+
+        // Visualizar dados específicos
+        function viewSharePointData() {
+            window.open(`${API}/api/sharepoint-data?limit=1000`, '_blank');
+        }
+
+        function viewCreareData() {
+            window.open(`${API}/api/creare-data?limit=1000`, '_blank');
+        }
+
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', function() {
+            loadInitialData();
+            
+            // Auto-refresh a cada 5 minutos
+            setInterval(loadInitialData, 300000);
+        });
+    </script>
+</body>
+</html>

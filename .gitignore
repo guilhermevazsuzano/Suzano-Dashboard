@@ -1,0 +1,38 @@
+﻿# Ignorar todos os JSON
+*.json
+**/*.json
+
+# Ignorar arquivos temporários comuns
+*.log
+*.tmp
+~$*
+*.bak
+*.swp
+
+# Ignorar caches/diretórios comuns
+node_modules/
+dist/
+build/
+.out/
+.cache/
+.temp/
+
+# Ignorar ambientes/segredos comuns
+.env
+.env.*
+*.secrets.*
+secrets/
+credential*/
+
+# Ignorar arquivos do sistema/IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Ignorar arquivos grandes específicos
+*.xlsx
+*.csv

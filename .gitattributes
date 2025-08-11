@@ -1,0 +1,4 @@
+sharepoint_complete_data.json filter=lfs diff=lfs merge=lfs -text
+sharepoint_complete_data_20250811_163527.json filter=lfs diff=lfs merge=lfs -text
+sharepoint_fixed.json filter=lfs diff=lfs merge=lfs -text
+*.json !text !filter !merge !diff
