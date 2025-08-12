@@ -1,115 +1,44 @@
-﻿import requests
-import json
-import urllib3
+﻿import os, requests, json
 from datetime import datetime, timedelta
 
-# Desabilitar avisos SSL
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+ID = os.getenv('CREARE_CLIENT_ID')
+SECRET = os.getenv('CREARE_CLIENT_SECRET')
+TOKEN_URL = os.getenv('CREARE_TOKEN_URL')
+SPEC_URL = os.getenv('CREARE_SPEC_URL')
+CID = os.getenv('CREARE_CUSTOMER_ID')
 
-class CreareDataCollector:
-    def __init__(self):
-        self.CLIENT_ID = "56963"
-        self.CLIENT_SECRET = "1MSiBaH879w="
-        self.CUSTOMER_CHILD_IDS = [39450]
-        self.AUTH_URL = "https://openid-provider.crearecloud.com.br/auth/v1/token"
-        self.API_BASE = "https://api.crearecloud.com.br/frotalog/specialized-services/v3"
-        self.session = requests.Session()
-        self.session.verify = False
-        self.token = None
-    
-    def authenticate(self):
-        """Autentica na API Creare"""
-        print("🔐 Autenticando na API Creare...")
-        try:
-            response = self.session.post(
-                self.AUTH_URL,
-                auth=(self.CLIENT_ID, self.CLIENT_SECRET),
-                json={"grant_type": "client_credentials"},
-                verify=False,
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            self.token = data.get("id_token")
-            
-            if self.token:
-                print("✅ Token obtido com sucesso!")
-                return True
-            else:
-                print("❌ Token não encontrado na resposta")
-                return False
-                
-        except Exception as e:
-            print(f"❌ Erro na autenticação: {e}")
-            return False
-    
-    def collect_events(self):
-        """Coleta eventos dos últimos 2 meses"""
-        if not self.authenticate():
-            raise Exception("Falha na autenticação")
-        
-        headers = {"Authorization": f"Bearer {self.token}"}
-        
-        # Período de 2 meses
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=60)
-        
-        print(f"📅 Coletando eventos de {start_date.strftime('%d/%m/%Y')} até {end_date.strftime('%d/%m/%Y')}")
-        
-        all_events = []
-        current_date = start_date
-        
-        while current_date < end_date:
-            next_date = min(current_date + timedelta(days=6), end_date)
-            
-            params = {
-                "customerChildIds": ",".join(map(str, self.CUSTOMER_CHILD_IDS)),
-                "fromTimestamp": current_date.isoformat(timespec='milliseconds') + "Z",
-                "toTimestamp": next_date.isoformat(timespec='milliseconds') + "Z",
-                "page": 1,
-                "size": 1000,
-                "isDetailed": True,
-                "sort": "ASC"
-            }
-            
-            while True:
-                try:
-                    response = self.session.get(
-                        f"{self.API_BASE}/events/by-page",
-                        headers=headers,
-                        params=params,
-                        verify=False,
-                        timeout=60
-                    )
-                    response.raise_for_status()
-                    
-                    data = response.json()
-                    content = data.get("content", [])
-                    
-                    if not content:
-                        break
-                    
-                    all_events.extend(content)
-                    print(f"   📄 Página {params['page']}: +{len(content)} eventos (Total: {len(all_events):,})")
-                    
-                    if data.get("last") or len(content) < 1000:
-                        break
-                    
-                    params["page"] += 1
-                    
-                except Exception as e:
-                    print(f"❌ Erro na página {params['page']}: {e}")
-                    break
-            
-            current_date = next_date + timedelta(seconds=1)
-        
-        print(f"✅ Total de eventos coletados: {len(all_events):,}")
-        return all_events
+def token():
+    r = requests.post(TOKEN_URL, auth=(ID,SECRET),
+                      json={'grant_type':'client_credentials'},
+                      verify=False, timeout=30)
+    r.raise_for_status()
+    return r.json()['id_token']
 
-# Instância global
-creare_collector = CreareDataCollector()
+def fetch(t):
+    hdr={'Authorization':f'Bearer {t}'}
+    end=datetime.utcnow()
+    start=end-timedelta(days=60)
+    all_e, page = [], 1
+    while True:
+        p = {
+            'customerChildIds':CID,
+            'fromTimestamp':start.isoformat()+'Z',
+            'toTimestamp':end.isoformat()+'Z',
+            'page':page,'size':1000,
+            'isDetailed':True,'sort':'ASC'
+        }
+        r = requests.get(f"{SPEC_URL}/events/by-page", headers=hdr,
+                         params=p, verify=False, timeout=60)
+        r.raise_for_status()
+        c = r.json().get('content',[])
+        if not c: break
+        all_e.extend(c)
+        if r.json().get('last'): break
+        page+=1
+    os.makedirs('creare_data',exist_ok=True)
+    fn=f"creare_data/events_{datetime.utcnow():%Y%m%d%H%M%S}.json"
+    with open(fn,'w',encoding='utf-8') as f: json.dump(all_e,f,indent=2,ensure_ascii=False)
+    print(f"✔️ {len(all_e)} eventos → {fn}")
 
-if __name__ == "__main__":
-    events = creare_collector.collect_events()
-    print(f"Eventos Creare coletados: {len(events)}")
+if __name__=='__main__':
+    tk=token(); fetch(tk)

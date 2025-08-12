@@ -1,394 +1,256 @@
-﻿import json
-import os
-import math
-import requests
-import base64
-import time
-from datetime import datetime, timedelta
-from fastapi import FastAPI, HTTPException
+﻿from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+import json
+import os
+import glob
+from datetime import datetime, timedelta
 from typing import Dict, List, Any
+import uvicorn
 
-app = FastAPI(title="Suzano Dashboard - SharePoint + Creare Validation")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="Dashboard Suzano Backend", version="1.0.0")
 
-# Configurações API Creare (para validação)
-CREARE_CONFIG = {
-    "CLIENT_ID": "56963",
-    "CLIENT_SECRET": "1MSiBaH879w", 
-    "CUSTOMER_CHILD_ID": "39450",
-    "AUTH_URL": "https://openid-provider.crearecloud.com.br/auth/v1/token",
-    "API_BASE_URL": "https://api.crearecloud.com.br/frotalog/specialized-services/v3"
-}
+# Configurar CORS para permitir acesso do frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Em produÃ§Ã£o, especifique os domÃ­nios permitidos
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Arquivos de dados
-SHAREPOINT_DATA_FILE = "sharepoint_complete_data_20250811_163527.json"
-validation_cache = {"last_validation": None, "creare_token": None}
+# VariÃ¡veis globais para armazenar dados em memÃ³ria
+data_sharepoint = {}
+data_creare = []
+metrics_cache = {}
 
 def load_sharepoint_data():
-    """Carrega os 151,500 registros do SharePoint"""
-    if not os.path.exists(SHAREPOINT_DATA_FILE):
-        print(f"❌ Arquivo não encontrado: {SHAREPOINT_DATA_FILE}")
-        return {"lists": {"Lista1": [], "Lista2": [], "Lista3": []}}
-    
-    with open(SHAREPOINT_DATA_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-def calculate_metrics_from_sharepoint():
-    """Calcula métricas EXATAS baseadas nos dados do SharePoint (151,500 registros)"""
-    data = load_sharepoint_data()
-    lists = data.get("lists", {})
-    
-    # Totais reais por lista
-    lista1_count = len(lists.get("Lista1", []))
-    lista2_count = len(lists.get("Lista2", []))
-    lista3_count = len(lists.get("Lista3", []))
-    total_records = lista1_count + lista2_count + lista3_count
-    
-    print(f"📊 Calculando métricas de {total_records:,} registros SharePoint")
-    
-    # MÉTRICAS BASEADAS NOS DADOS REAIS (matching dashboard-final-completo.html)
-    # Desvios: baseado em padrões operacionais (aproximadamente 2.8% dos registros)
-    total_desvios = 4325  # Valor do dashboard original
-    
-    # Alertas ativos: aproximadamente 48% dos desvios
-    alertas_ativos = 2092  # Valor do dashboard original
-    
-    # Tempo médio de resolução: baseado no volume operacional
-    tempo_resolucao = "2.33"  # Valor do dashboard original
-    
-    # Eficiência operacional: baseada na proporção de registros processados
-    eficiencia = "92.0%"  # Valor do dashboard original
-    
-    # Veículos monitorados: IDs únicos extraídos dos registros
-    veiculos_unicos = set()
-    for list_name, items in lists.items():
-        for item in items:
-            # Procurar IDs de veículos nos campos
-            vehicle_fields = ['VehicleId', 'Id', 'vehicle_id', 'veiculo_id']
-            for field in vehicle_fields:
-                if field in item and item[field]:
-                    veiculos_unicos.add(str(item[field]))
-    
-    veiculos_monitorados = len(veiculos_unicos) if veiculos_unicos else 1247  # Default do dashboard
-    
-    # Pontos de interesse: fixo baseado na operação Suzano
-    pontos_interesse = 15
-    
-    return {
-        "total_desvios": total_desvios,
-        "alertas_ativos": alertas_ativos, 
-        "tempo_medio_resolucao": tempo_resolucao,
-        "eficiencia_operacional": eficiencia,
-        "veiculos_monitorados": veiculos_monitorados,
-        "pontos_interesse": pontos_interesse,
-        "fonte_dados": "SharePoint Real Data",
-        "total_registros_sp": total_records,
-        "breakdown_listas": {
-            "Lista1": lista1_count,
-            "Lista2": lista2_count, 
-            "Lista3": lista3_count
-        },
-        "ultima_atualizacao": datetime.now().isoformat()
-    }
-
-def get_creare_auth_token():
-    """Obtém token da API Creare para validação"""
+    """Carrega dados do SharePoint do arquivo JSON mais recente."""
+    global data_sharepoint
     try:
-        credentials = f"{CREARE_CONFIG['CLIENT_ID']}:{CREARE_CONFIG['CLIENT_SECRET']}"
-        encoded_credentials = base64.b64encode(credentials.encode()).decode()
+        # Encontra o arquivo SharePoint mais recente
+        sharepoint_files = glob.glob("sharepoint_complete_data_*.json")
+        if not sharepoint_files:
+            print("âŒ Nenhum arquivo SharePoint encontrado")
+            return False
         
-        headers = {
-            "Authorization": f"Basic {encoded_credentials}",
-            "Content-Type": "application/json"
+        latest_file = max(sharepoint_files, key=os.path.getctime)
+        print(f"ðŸ“‹ Carregando dados SharePoint de: {latest_file}")
+        
+        with open(latest_file, \u0027r\', encoding=\u0027utf-8\u0027) as f:
+            data_sharepoint = json.load(f)
+        
+        print(f"âœ… SharePoint carregado: {len(data_sharepoint.get('Lista1', []))} registros Lista1, "
+              f"{len(data_sharepoint.get('Lista2', []))} registros Lista2, "
+              f"{len(data_sharepoint.get('Lista3', []))} registros Lista3")
+        return True
+    except Exception as e:
+        print(f"âŒ Erro ao carregar SharePoint: {e}")
+        return False
+
+def load_creare_data():
+    """Carrega e unifica todos os dados do Creare."""
+    global data_creare
+    try:
+        data_creare = []
+        creare_files = glob.glob("creare_data/*.json")
+        
+        if not creare_files:
+            print("âŒ Nenhum arquivo Creare encontrado")
+            return False
+        
+        for file_path in creare_files:
+            print(f"ðŸ“Š Carregando dados Creare de: {file_path}")
+            with open(file_path, \u0027r\', encoding=\u0027utf-8\u0027) as f:
+                file_data = json.load(f)
+                if isinstance(file_data, list):
+                    data_creare.extend(file_data)
+                elif isinstance(file_data, dict) and 'events' in file_data:
+                    data_creare.extend(file_data['events'])
+                else:
+                    # Se for um objeto Ãºnico, adiciona como lista
+                    data_creare.append(file_data)
+        
+        print(f"âœ… Creare carregado: {len(data_creare)} eventos totais")
+        return True
+    except Exception as e:
+        print(f"âŒ Erro ao carregar Creare: {e}")
+        return False
+
+def calculate_metrics():
+    """Calcula mÃ©tricas idÃªnticas ao dashboard HTML original."""
+    global metrics_cache
+    
+    try:
+        # Dados base do SharePoint
+        lista1 = data_sharepoint.get('Lista1', [])
+        lista2 = data_sharepoint.get('Lista2', [])
+        lista3 = data_sharepoint.get('Lista3', [])
+        
+        # Eventos Creare
+        eventos_creare = data_creare
+        
+        # CÃ¡lculos das mÃ©tricas (baseado no dashboard original)
+        total_desvios = len(lista1) + len([e for e in eventos_creare if e.get('eventType') in ['SPEED_VIOLATION', 'HARSH_BRAKING', 'GEOFENCE_VIOLATION']])
+        
+        alertas_ativos = len([e for e in eventos_creare if not e.get('resolved', False)])
+        
+        # Tempo mÃ©dio de resoluÃ§Ã£o (em horas)
+        eventos_resolvidos = [e for e in eventos_creare if e.get('resolved', False) and e.get('resolvedAt')]
+        if eventos_resolvidos:
+            tempos_resolucao = []
+            for evento in eventos_resolvidos:
+                try:
+                    created = datetime.fromisoformat(evento['createdAt'].replace('Z', '+00:00'))
+                    resolved = datetime.fromisoformat(evento['resolvedAt'].replace('Z', '+00:00'))
+                    tempo_resolucao = (resolved - created).total_seconds() / 3600  # em horas
+                    tempos_resolucao.append(tempo_resolucao)
+                except:
+                    continue
+            tempo_medio_resolucao = f"{sum(tempos_resolucao) / len(tempos_resolucao):.1f}h" if tempos_resolucao else "N/A"
+        else:
+            tempo_medio_resolucao = "N/A"
+        
+        # EficiÃªncia operacional (% de eventos resolvidos)
+        total_eventos = len(eventos_creare)
+        eventos_resolvidos_count = len([e for e in eventos_creare if e.get('resolved', False)])
+        eficiencia_operacional = f"{(eventos_resolvidos_count / total_eventos * 100):.1f}%" if total_eventos > 0 else "0%"
+        
+        # VeÃ­culos Ãºnicos monitorados
+        veiculos_sharepoint = set()
+        for lista in [lista1, lista2, lista3]:
+            for item in lista:
+                if 'vehicleId' in item:
+                    veiculos_sharepoint.add(item['vehicleId'])
+                elif 'VehicleID' in item:
+                    veiculos_sharepoint.add(item['VehicleID'])
+        
+        veiculos_creare = set([e.get('vehicleId') for e in eventos_creare if e.get('vehicleId')])
+        veiculos_monitorados = len(veiculos_sharepoint.union(veiculos_creare))
+        
+        # Pontos de interesse (baseado em localizaÃ§Ãµes Ãºnicas)
+        pontos_interesse = len(set([f"{e.get('location', {}).get('latitude', 0)},{e.get('location', {}).get('longitude', 0)}" 
+                                   for e in eventos_creare if e.get('location')]))
+        
+        metrics_cache = {
+            "total_desvios": total_desvios,
+            "alertas_ativos": alertas_ativos,
+            "tempo_medio_resolucao": tempo_medio_resolucao,
+            "eficiencia_operacional": eficiencia_operacional,
+            "veiculos_monitorados": veiculos_monitorados,
+            "pontos_interesse": pontos_interesse,
+            "last_updated": datetime.now().isoformat()
         }
         
-        response = requests.post(
-            CREARE_CONFIG["AUTH_URL"],
-            headers=headers,
-            json={"grant_type": "client_credentials"},
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            token_data = response.json()
-            validation_cache["creare_token"] = token_data.get("id_token")
-            return validation_cache["creare_token"]
-        else:
-            print(f"❌ Erro autenticação Creare: {response.status_code}")
-            return None
+        print(f"âœ… MÃ©tricas calculadas: {metrics_cache}")
+        return True
     except Exception as e:
-        print(f"❌ Erro ao obter token Creare: {e}")
-        return None
+        print(f"âŒ Erro ao calcular mÃ©tricas: {e}")
+        return False
 
-def fetch_creare_events_for_validation(days=7):
-    """Busca eventos da API Creare para comparação"""
-    token = validation_cache.get("creare_token") or get_creare_auth_token()
-    if not token:
-        return []
+@app.on_event("startup")
+async def startup_event():
+    """Carrega dados na inicializaÃ§Ã£o do servidor."""
+    print("ðŸš€ Iniciando Dashboard Backend...")
     
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=days)
+    if load_sharepoint_data():
+        print("âœ… Dados SharePoint carregados com sucesso")
+    else:
+        print("âš ï¸ Falha ao carregar dados SharePoint")
     
-    headers = {"Authorization": f"Bearer {token}"}
-    params = {
-        "fromTimestamp": start_date.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-        "toTimestamp": end_date.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-        "customerChildIds": [int(CREARE_CONFIG["CUSTOMER_CHILD_ID"])],
-        "pageSize": 1000,
-        "page": 1,
-        "sort": "ASC",
-        "isDetailed": True
-    }
+    if load_creare_data():
+        print("âœ… Dados Creare carregados com sucesso")
+    else:
+        print("âš ï¸ Falha ao carregar dados Creare")
     
-    all_events = []
-    page = 1
+    if calculate_metrics():
+        print("âœ… MÃ©tricas calculadas com sucesso")
+    else:
+        print("âš ï¸ Falha ao calcular mÃ©tricas")
     
-    try:
-        while page <= 10:  # Limitar para evitar timeout
-            params["page"] = page
-            
-            response = requests.get(
-                f"{CREARE_CONFIG['API_BASE_URL']}/events/by-page",
-                headers=headers,
-                params=params,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                events = data.get("content", [])
-                
-                if not events:
-                    break
-                    
-                all_events.extend(events)
-                print(f"📡 Página {page}: +{len(events)} eventos Creare (Total: {len(all_events)})")
-                
-                if data.get("last", True):
-                    break
-                    
-                page += 1
-                time.sleep(0.5)  # Rate limiting
-                
-            else:
-                print(f"❌ Erro página {page}: {response.status_code}")
-                break
-                
-    except Exception as e:
-        print(f"❌ Erro ao buscar eventos Creare: {e}")
-    
-    print(f"✅ Total obtido da API Creare: {len(all_events)} eventos")
-    return all_events
+    print("ðŸŽ¯ Backend pronto para receber requisiÃ§Ãµes!")
 
 @app.get("/")
-def serve_dashboard():
-    """Serve o dashboard HTML"""
-    return FileResponse("dashboard_suzano.html")
+async def root():
+    """Endpoint raiz com informaÃ§Ãµes do sistema."""
+    return {
+        "message": "Dashboard Suzano Backend API",
+        "version": "1.0.0",
+        "status": "online",
+        "endpoints": [
+            "/api/sharepoint-data",
+            "/api/creare-data", 
+            "/api/metrics"
+        ]
+    }
+
+@app.get("/api/sharepoint-data")
+async def get_sharepoint_data():
+    """Retorna dados do SharePoint."""
+    if not data_sharepoint:
+        raise HTTPException(status_code=404, detail="Dados SharePoint nÃ£o encontrados")
+    
+    return {
+        "success": True,
+        "data": data_sharepoint,
+        "summary": {
+            "Lista1": len(data_sharepoint.get('Lista1', [])),
+            "Lista2": len(data_sharepoint.get('Lista2', [])),
+            "Lista3": len(data_sharepoint.get('Lista3', []))
+        }
+    }
+
+@app.get("/api/creare-data")
+async def get_creare_data():
+    """Retorna eventos do Creare."""
+    if not data_creare:
+        raise HTTPException(status_code=404, detail="Dados Creare nÃ£o encontrados")
+    
+    return {
+        "success": True,
+        "events": data_creare,
+        "total_events": len(data_creare),
+        "event_types": list(set([e.get('eventType', 'UNKNOWN') for e in data_creare]))
+    }
 
 @app.get("/api/metrics")
-def get_metrics():
-    """Endpoint principal - métricas dos dados SharePoint"""
-    try:
-        metrics = calculate_metrics_from_sharepoint()
-        
-        # Variações simuladas (para manter compatibilidade com layout)
-        variations = {
-            "desvios_variacao": "+12%",
-            "alertas_variacao": "+8%", 
-            "tempo_variacao": "-15%",
-            "eficiencia_variacao": "+5%"
-        }
-        
-        return {
-            "success": True,
-            "metrics": metrics,
-            "variations": variations,
-            "timestamp": datetime.now().isoformat(),
-            "data_source": "SharePoint (151,500 registros reais)"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/events")
-def get_events(limit: int = 50):
-    """Eventos baseados nos dados SharePoint"""
-    try:
-        data = load_sharepoint_data()
-        lists = data.get("lists", {})
-        
-        events = []
-        
-        # Combinar dados das 3 listas SharePoint
-        for list_name, items in lists.items():
-            for i, item in enumerate(items[:limit//3]):
-                event_id = item.get('Id', f"{list_name}_{i}")
-                title = item.get('Title', f"Item {list_name}")
-                created = item.get('Created', datetime.now().isoformat())
-                
-                events.append({
-                    "id": event_id,
-                    "titulo": title,
-                    "lista_origem": list_name,
-                    "data_evento": created,
-                    "status": "Ativo" if i % 3 == 0 else "Processado",
-                    "prioridade": "Alta" if i % 4 == 0 else "Normal",
-                    "detalhes": f"Registro SharePoint {event_id}"
-                })
-        
-        return {
-            "success": True,
-            "total": len(events),
-            "events": events,
-            "fonte": "SharePoint Lists",
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/validation/run")
-def run_validation():
-    """Executa validação: SharePoint (principal) vs Creare API (referência)"""
-    try:
-        print("🔍 Iniciando validação SharePoint vs API Creare...")
-        
-        # 1. Carregar dados SharePoint (fonte principal)
-        sp_data = load_sharepoint_data()
-        sp_lists = sp_data.get("lists", {})
-        sp_total = sum(len(items) for items in sp_lists.values())
-        
-        # 2. Buscar dados da API Creare (para comparação)
-        creare_events = fetch_creare_events_for_validation(days=7)
-        
-        # 3. Análise comparativa
-        validation_report = {
-            "timestamp": datetime.now().isoformat(),
-            "fonte_principal": "SharePoint",
-            "fonte_validacao": "API Creare",
-            "sharepoint_summary": {
-                "total_records": sp_total,
-                "lists_breakdown": {name: len(items) for name, items in sp_lists.items()},
-                "periodo": "Dados históricos completos"
-            },
-            "creare_summary": {
-                "total_events": len(creare_events),
-                "periodo": "Últimos 7 dias",
-                "event_types": {}
-            },
-            "comparison_results": {},
-            "validation_status": "success" if creare_events else "partial",
-            "recommendations": []
-        }
-        
-        # Análise de tipos de eventos Creare
-        if creare_events:
-            event_types = {}
-            vehicle_ids = set()
-            for event in creare_events:
-                evt_type = event.get("eventLabel", "Unknown")
-                event_types[evt_type] = event_types.get(evt_type, 0) + 1
-                
-                vehicle_id = event.get("vehicleId")
-                if vehicle_id:
-                    vehicle_ids.add(str(vehicle_id))
-            
-            validation_report["creare_summary"]["event_types"] = event_types
-            validation_report["creare_summary"]["unique_vehicles"] = len(vehicle_ids)
-        
-        # Resultados da comparação
-        if creare_events and sp_total > 0:
-            ratio = len(creare_events) / sp_total
-            validation_report["comparison_results"] = {
-                "data_ratio": round(ratio, 6),
-                "ratio_status": "normal" if 0.001 <= ratio <= 0.1 else "unusual",
-                "volume_assessment": f"API Creare: {len(creare_events)} eventos vs SharePoint: {sp_total:,} registros",
-                "temporal_note": "API Creare = 7 dias recentes | SharePoint = histórico completo"
-            }
-        
-        # Recomendações
-        if not creare_events:
-            validation_report["recommendations"].append({
-                "priority": "HIGH",
-                "issue": "Nenhum evento obtido da API Creare",
-                "action": "Verificar conectividade e credenciais API"
-            })
-        else:
-            validation_report["recommendations"].append({
-                "priority": "LOW",
-                "issue": "Validação concluída com sucesso",
-                "action": "Monitorar periodicamente para detectar inconsistências"
-            })
-        
-        # Cache do resultado
-        validation_cache["last_validation"] = validation_report
-        
-        # Salvar relatório
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_filename = f"validation_sharepoint_vs_creare_{timestamp}.json"
-        
-        with open(report_filename, 'w', encoding='utf-8') as f:
-            json.dump(validation_report, f, ensure_ascii=False, indent=2, default=str)
-        
-        print(f"✅ Validação concluída! Relatório: {report_filename}")
-        
-        return {
-            "success": True,
-            "message": "Validação SharePoint vs Creare concluída",
-            "summary": {
-                "sharepoint_records": sp_total,
-                "creare_events": len(creare_events),
-                "validation_status": validation_report["validation_status"],
-                "report_file": report_filename
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        print(f"❌ Erro na validação: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/validation/report")
-def get_validation_report():
-    """Retorna último relatório de validação"""
-    if not validation_cache.get("last_validation"):
-        return {
-            "available": False,
-            "message": "Nenhuma validação executada. Execute /api/validation/run primeiro."
-        }
-    
-    report = validation_cache["last_validation"]
-    return {
-        "available": True,
-        "report": report,
-        "summary": {
-            "sharepoint_total": report["sharepoint_summary"]["total_records"],
-            "creare_total": report["creare_summary"]["total_events"],
-            "comparison_ratio": report.get("comparison_results", {}).get("data_ratio", 0),
-            "validation_status": report.get("validation_status", "unknown")
-        }
-    }
-
-@app.get("/api/status")
-def get_system_status():
-    """Status geral do sistema"""
-    sp_data = load_sharepoint_data()
-    sp_available = len(sp_data.get("lists", {})) > 0
+async def get_metrics():
+    """Retorna mÃ©tricas calculadas para o dashboard."""
+    if not metrics_cache:
+        # Tenta recalcular se nÃ£o existir cache
+        if not calculate_metrics():
+            raise HTTPException(status_code=500, detail="Erro ao calcular mÃ©tricas")
     
     return {
-        "sistema": "Dashboard Suzano - SharePoint + Creare Validation",
-        "sharepoint_data_available": sp_available,
-        "sharepoint_records": sum(len(items) for items in sp_data.get("lists", {}).values()) if sp_available else 0,
-        "creare_api_configured": bool(CREARE_CONFIG["CLIENT_ID"]),
-        "last_validation": validation_cache.get("last_validation", {}).get("timestamp", "Never"),
-        "status": "operational" if sp_available else "missing_data",
-        "timestamp": datetime.now().isoformat()
+        "success": True,
+        "metrics": metrics_cache
     }
+
+@app.post("/api/reload-data")
+async def reload_data():
+    """Recarrega todos os dados e recalcula mÃ©tricas."""
+    try {
+        sharepoint_ok = load_sharepoint_data()
+        creare_ok = load_creare_data()
+        metrics_ok = calculate_metrics()
+        
+        return {
+            "success": True,
+            "reloaded": {
+                "sharepoint": sharepoint_ok,
+                "creare": creare_ok,
+                "metrics": metrics_ok
+            },
+            "message": "Dados recarregados com sucesso"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao recarregar dados: {str(e)}")
 
 if __name__ == "__main__":
-    import uvicorn
-    print("🚀 Iniciando Dashboard Suzano...")
-    print("📊 Fonte principal: SharePoint (151,500 registros)")
-    print("🔍 Validação: API Creare")
-    print("🌐 Dashboard: http://localhost:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # ConfiguraÃ§Ã£o para execuÃ§Ã£o local
+    uvicorn.run(
+        "dashboard_backend:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
